@@ -13,46 +13,57 @@ import os
 METRIC_NAMES = ['RMSE', 'MAE', 'Pearson', 'SpectralCos', 'MaxXcorr', 'SSIM1D']
 
 @torch.no_grad()
-def collect_examples(G: torch.nn.Module, loader, cfg: dict, *,
-                     channels, classes=None, examples_per_cls=3, seed=4):
+def collect_examples(G: torch.nn.Module, loader, cfg: dict, seed=4):
     """
-    Genera ejemplos real vs. sintético controlando la selección de ejemplos y el ruido aleatorio.
+    Genera tantos ejemplos sintéticos como reales, por clase.
+
+    Args:
+        G: Generador entrenado.
+        loader: DataLoader de validación.
+        cfg: Configuración con 'device', 'latent_dim' y 'fs'.
+        seed: Semilla para reproducibilidad.
+
+    Returns:
+        Dict con ejemplos reales y generados por clase.
     """
     torch.manual_seed(seed)
     np.random.seed(seed)
+    import random
     random.seed(seed)
 
     G.eval()
     device = cfg["device"]
-    z_dim = cfg["latent_dim"]
+    z_dim = cfg["dz"]
 
+    # Agrupar ejemplos por clase
     buckets = {}
     for x, y in loader:
         for lbl in torch.unique(y):
             buckets.setdefault(int(lbl), []).append(x[y == lbl])
 
-    class_list = sorted(buckets) if classes is None else [c for c in classes if c in buckets]
     out = {}
 
-    for cls in class_list:
-        real_full = torch.cat(buckets[cls], 0)
+    for cls, samples in buckets.items():
+        real_full = torch.cat(samples, dim=0)
         N, C, T = real_full.shape
-        idx = np.random.choice(N, min(examples_per_cls, N), replace=False)
-        real_sel = real_full[idx].to(device)
 
-        z = torch.randn(real_sel.size(0), z_dim, device=device)
-        y = torch.full((real_sel.size(0),), cls, dtype=torch.long, device=device)
+        real_sel = real_full.to(device)
+        z = torch.randn(N, z_dim, device=device)
+        y = torch.full((N,), cls, dtype=torch.long, device=device)
         fake_sel = G(z, y).cpu()
+
+        print(f"[Clase {cls}] Reales: {real_sel.shape} | Generadas: {fake_sel.shape}")
 
         out[cls] = {
             "real": real_sel.cpu().numpy(),
             "fake": fake_sel.numpy(),
-            "channels": channels,
             "fs": cfg["fs"]
         }
 
     G.train()
     return out
+
+
 
 
 def _pearson(a, b):
@@ -119,10 +130,10 @@ def save_results(params, metrics, filename, total_time, dataset_path, variant_na
         "VARIANT": variant_name,
         "DATASET": dataset_name,
         "TIMESTAMP": timestamp,
-        "LATENT_DIM": params["LATENT_DIM"],
-        "BATCH_SIZE": params["BATCH_SIZE"],
-        "POOL_K": params["POOL_K"],
-        "EMB_DIM": params["EMB_DIM"],
+        "LATENT_DIM": params["dz"],
+        "BATCH_SIZE": params["B_s"],
+        "POOL_K": params["k"],
+        "EMB_DIM": params["de"],
         "LR_G_VALUES": params["LR_G_VALUES"],
         "LR_D_VALUES": params["LR_D_VALUES"],
         "EPOCHS": params["EPOCHS"],

@@ -60,88 +60,104 @@ def visualize_breakdowns(G, cfg, class_label=0, save_dir=None):
 
         
 @torch.no_grad()
-def plot_comparison(*, examples: dict[int, dict], channels: ty.Sequence[int], mode="time", save_dir=None):
+def plot_comparison(*, examples: dict[int, dict], channels: ty.Sequence[int],
+                    mode="time", save_dir=None, idx_fake=0, idx_reales=None):
     """
-    Visualiza comparaciones real vs. sintético en el dominio temporal o CWT.
+    Compara un ejemplo sintético específico contra varios ejemplos reales, por clase.
 
-    Args:
-        examples: Dict de ejemplos (salida de collect_examples).
-        channels: Lista de índices de canales a visualizar.
-        mode: "time" o "cwt".
-        save_dir: Carpeta donde guardar las figuras (None = solo muestra).
+    Si no se pasan idx_reales, se toma automáticamente el máximo posible.
+    Si hay índices fuera de rango, se descartan con advertencia.
     """
     assert mode in ("time", "cwt"), "Modo debe ser 'time' o 'cwt'"
 
     for cls, data in examples.items():
         real = data["real"]
         fake = data["fake"]
-        R, C, T = real.shape
         fs = data["fs"]
 
+        N_real = real.shape[0]
+        N_fake = fake.shape[0]
+
+        print(f"[Class {cls}] Real Samples: {N_real} | Generated: {N_fake}")
+
+        if idx_fake >= N_fake:
+            print(f"[⚠] idx_fake={idx_fake} fuera de rango, usando idx_fake=0.")
+            idx_fake = 0
+
+        if idx_reales is None:
+            idx_reales = list(range(min(3, N_real)))
+        else:
+            idx_reales = [i for i in idx_reales if i < N_real]
+            if not idx_reales:
+                print(f"[⚠] Ningún índice de idx_reales válido para clase {cls}, se omite.")
+                continue
+
+        n_reales = len(idx_reales)
+        t_axis = np.arange(real.shape[2]) / fs
+
         if mode == "time":
-            t_axis = np.arange(T) / fs
-            fig, axes = plt.subplots(R, len(channels),
-                                     figsize=(len(channels) * 3.6, R * 2.2),
-                                     sharex=True, sharey='row')
-            fig.suptitle(f"Class {cls} · Real vs. Synthetic (Time)", weight='bold', y=1.02)
+            fig, axes = plt.subplots(n_reales + 1, len(channels),
+                                     figsize=(len(channels) * 3.6, (n_reales + 1) * 2.2),
+                                     sharex=True, sharey='col')
+            fig.suptitle(f"Class {cls} · Real Samples vs. Generated (Time)", weight='bold', y=1.02)
 
-            for r in range(R):
+            for r_idx, real_idx in enumerate(idx_reales):
                 for c_idx, ch in enumerate(channels):
-                    ax = axes[r, c_idx] if R > 1 else axes[c_idx]
-                    real_sig = real[r, ch]
-                    fake_sig = fake[r, ch]
-
-                    if c_idx == 0:
-                        σ = real_sig.std()
-                        ax.set_ylim(real_sig.mean() - 5 * σ, real_sig.mean() + 5 * σ)
-
-                    ax.plot(t_axis, real_sig, lw=1.0, color="#1f77b4", label="Real")
-                    ax.plot(t_axis, fake_sig, lw=1.0, ls="--", color="#d62728", label="Fake")
-
-                    if r == 0:
+                    ax = axes[r_idx, c_idx]
+                    sig = real[real_idx, ch]
+                    ax.plot(t_axis, sig, lw=1.0, color="#1f77b4")
+                    if r_idx == 0:
                         ax.set_title(f"Channel {ch}")
                     if c_idx == 0:
-                        ax.set_ylabel(f"Ex {r + 1}\nAmplitude")
-                    if r == R - 1:
-                        ax.set_xlabel("Time [s]")
-                    if r == 0 and c_idx == 0:
-                        ax.legend(frameon=False, fontsize=8)
+                        ax.set_ylabel(f"Real {real_idx}")
+
+            for c_idx, ch in enumerate(channels):
+                ax = axes[-1, c_idx]
+                sig = fake[idx_fake, ch]
+                ax.plot(t_axis, sig, lw=1.0, color="#d62728")
+                if c_idx == 0:
+                    ax.set_ylabel(f"Generated {idx_fake}")
 
             plt.tight_layout(rect=[0, 0, 1, 0.97])
             if save_dir:
-                fig.savefig(f"{save_dir}/time_cls{cls}.png", bbox_inches="tight")
-            plt.show()
+                fig.savefig(f"{save_dir}/time_cls{cls}_fake{idx_fake}.png", bbox_inches="tight")
+            plt.close()
 
         elif mode == "cwt":
             all_pw = []
-            for r in range(R):
+            for real_idx in idx_reales:
                 for ch in channels:
-                    all_pw.append(_cwt_power(real[r, ch]))
-                    all_pw.append(_cwt_power(fake[r, ch]))
-            vmax = np.percentile(np.concatenate(all_pw), 99)
+                    all_pw.append(_cwt_power(real[real_idx, ch]))
+            for ch in channels:
+                all_pw.append(_cwt_power(fake[idx_fake, ch]))
 
-            cols = len(channels) * 2
-            fig, axes = plt.subplots(R, cols, figsize=(cols * 2, R * 2.4))
+            vmax = np.percentile(np.concatenate(all_pw), 99)
+            cols = len(channels)
+            fig, axes = plt.subplots(n_reales + 1, cols, figsize=(cols * 2, (n_reales + 1) * 2.4))
             fig.suptitle(f"CWT Power · Class {cls}", weight='bold', y=.995)
 
-            for r in range(R):
+            for r_idx, real_idx in enumerate(idx_reales):
                 for c_idx, ch in enumerate(channels):
-                    ax_r = axes[r, 2 * c_idx]
-                    ax_f = axes[r, 2 * c_idx + 1]
+                    ax = axes[r_idx, c_idx]
+                    pw = _cwt_power(real[real_idx, ch])
+                    ax.imshow(pw, cmap=_CMAP, origin='lower', vmax=vmax, aspect='auto')
+                    if r_idx == 0:
+                        ax.set_title(f"Ch {ch}")
+                    if c_idx == 0:
+                        ax.set_ylabel(f"Real {real_idx}")
 
-                    pr = _cwt_power(real[r, ch])
-                    pf = _cwt_power(fake[r, ch])
-                    im_r = ax_r.imshow(pr, cmap=_CMAP, origin='lower', vmax=vmax, aspect='auto')
-                    ax_f.imshow(pf, cmap=_CMAP, origin='lower', vmax=vmax, aspect='auto')
-
-                    if r == 0:
-                        ax_r.set_title(f"Ch {ch} – Real")
-                        ax_f.set_title(f"Ch {ch} – Fake")
+            for c_idx, ch in enumerate(channels):
+                ax = axes[-1, c_idx]
+                pw = _cwt_power(fake[idx_fake, ch])
+                ax.imshow(pw, cmap=_CMAP, origin='lower', vmax=vmax, aspect='auto')
+                if c_idx == 0:
+                    ax.set_ylabel(f"Generated {idx_fake}")
 
             plt.tight_layout()
             if save_dir:
-                fig.savefig(f"{save_dir}/cwt_cls{cls}.png", bbox_inches="tight")
-            plt.show()
+                fig.savefig(f"{save_dir}/cwt_cls{cls}_fake{idx_fake}.png", bbox_inches="tight")
+            plt.close()
+
 
 
 @torch.no_grad()
@@ -159,4 +175,4 @@ def plot_heat(t: torch.Tensor, title: str, save_path=None):
     plt.tight_layout()
     if save_path:
         plt.savefig(save_path, bbox_inches="tight")
-    plt.show()
+    plt.close()

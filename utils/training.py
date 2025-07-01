@@ -58,7 +58,7 @@ def init_he(m):
             nn.init.zeros_(m.bias)
 
 
-def train_epoch(G, D, loader, optG, optD, scaler, device, latent_dim,
+def train_epoch(G, D, loader, optG, optD, scaler, device, dz,
                 feedback_ratio=0.1, g_steps=1):
     """
     Entrena una epoch del GAN.
@@ -69,7 +69,7 @@ def train_epoch(G, D, loader, optG, optD, scaler, device, latent_dim,
         optG, optD: optimizadores.
         scaler: GradScaler.
         device: str o torch.device ('cuda' o 'cpu').
-        latent_dim: dimensión del vector latente.
+        dz: dimensión del vector latente.
         feedback_ratio: proporción de muestras generadas inyectadas.
         g_steps: número de pasos del generador por batch.
     """
@@ -78,7 +78,7 @@ def train_epoch(G, D, loader, optG, optD, scaler, device, latent_dim,
         B = xr.size(0)
 
         N_feedback = int(B * feedback_ratio)
-        z = torch.randn(B, latent_dim, device=device)
+        z = torch.randn(B, dz, device=device)
         xf = G(z, y).detach()
 
         if N_feedback > 0:
@@ -98,7 +98,7 @@ def train_epoch(G, D, loader, optG, optD, scaler, device, latent_dim,
         scaler.update()
 
         for _ in range(g_steps):
-            z = torch.randn(B, latent_dim, device=device)
+            z = torch.randn(B, dz, device=device)
             optG.zero_grad(set_to_none=True)
             with torch.amp.autocast(device_type='cuda'):
                 gen = G(z, y)

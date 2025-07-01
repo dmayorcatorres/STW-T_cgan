@@ -4,10 +4,19 @@ import torch.nn.functional as F
 from .blocks import TemporalDisc, Spatial, Frequency
 
 class Discriminator(nn.Module):
-    def __init__(self, n_cls, C, T, k, emb, use_t=True, use_s=True, use_f=True):
+    def __init__(self,
+                 C: int,
+                 T: int,
+                 k: int,
+                 de: int,
+                 n_cls: int,
+                 use_t: bool = True,
+                 use_s: bool = False,
+                 use_f: bool = False):
+        
         super().__init__()
         self.C, self.T, self.k = C, T, k
-        self.label = nn.Embedding(n_cls, emb)
+        self.label = nn.Embedding(n_cls, de)
 
         self.use_t, self.use_s, self.use_f = use_t, use_s, use_f
         if use_t: self.t = TemporalDisc(C)
@@ -15,7 +24,7 @@ class Discriminator(nn.Module):
         if use_f: self.f = Frequency(C)
 
         self.head = nn.Sequential(
-            nn.Linear(C * T + emb, 128),
+            nn.Linear(C * T + de, 128),
             nn.LeakyReLU(0.2),
             nn.Linear(128, 1),
             nn.Sigmoid()

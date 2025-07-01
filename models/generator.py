@@ -1,43 +1,30 @@
+# models/generator.py
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .blocks import TemporalGen, Spatial, Frequency  # Si los bloques están separados
+from .blocks import TemporalGen
 
 class Generator(nn.Module):
-    def __init__(self, z_dim, n_cls, C, T, k, emb, use_t=True, use_s=True, use_f=True):
+    def __init__(self, C: int, T: int, dz: int, de: int, n_cls: int):
+        """
+        C     Número de canales de salida
+        T     Longitud temporal de salida
+        dz    Dimensión del vector latente
+        de    Dimensión del embedding condicional
+        n_cls Número de clases para el embedding
+        """
         super().__init__()
-        self.C, self.T, self.k = C, T, k
-        self.label = nn.Embedding(n_cls, emb)
-        self.fc = nn.Linear(z_dim + emb, C * T)
+        self.C, self.T = C, T
+        self.label     = nn.Embedding(n_cls, de)
+        self.fc        = nn.Linear(dz + de, C * T)
+        self.temporal  = TemporalGen(C)
+        self.out_act   = nn.Tanh()
 
-        self.use_t, self.use_s, self.use_f = use_t, use_s, use_f
-        if use_t: self.t = TemporalGen(C)
-        if use_s: self.s = Spatial(C)
-        if use_f: self.f = Frequency(C)
-
-        self.out_act = nn.Tanh()
-
-    def forward(self, z, y, return_br=False):
-        h = torch.cat([z, self.label(y)], 1)
-        x = self.fc(h).view(-1, self.C, self.T)
-
-        branches = []
-        if self.use_t:
-            branches.append(self.t(x))
-        if self.use_s:
-            s = self.s(x).unsqueeze(-1).expand(-1, -1, self.k)
-            branches.append(s)
-        if self.use_f:
-            f = self.f(x).unsqueeze(-1).expand(-1, -1, self.k)
-            branches.append(f)
-
-        merged = sum(branches) / len(branches)
-        out = self.out_act(F.interpolate(merged, size=self.T, mode="linear"))
-
-        if return_br:
-            t = self.t(x) if self.use_t else torch.zeros_like(merged)
-            s = self.s(x).unsqueeze(-1).expand(-1, -1, self.k) if self.use_s else torch.zeros_like(merged)
-            f = self.f(x).unsqueeze(-1).expand(-1, -1, self.k) if self.use_f else torch.zeros_like(merged)
-            return out, (t, s, f, merged)
-        else:
-            return out
+    def forward(self, z: torch.Tensor, y: torch.LongTensor) -> torch.Tensor:
+        # z: (B, dz), y: (B,)
+        e_l = self.label(y)                         # (B, de)
+        h   = torch.cat([z, e_l], dim=1)            # (B, dz+de)
+        x   = self.fc(h).view(-1, self.C, self.T)   # (B, C, T)
+        x   = self.temporal(x)                      # (B, C, T′)
+        x   = F.interpolate(x, size=self.T, mode="linear", align_corners=False)
+        return self.out_act(x)                      # (B, C, T)
