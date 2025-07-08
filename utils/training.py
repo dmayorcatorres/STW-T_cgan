@@ -5,50 +5,7 @@ import numpy as np
 from torch.utils.data import DataLoader
 import typing as ty
 import random
-
-import torch
-import torch.nn.functional as F
-
-def spectral_cosine_similarity(fake: torch.Tensor,
-                               real: torch.Tensor,
-                               eps: float = 1e-8) -> torch.Tensor:
-    """
-    Calcula la similitud coseno espectral media por batch.
-    - fake, real: (B, C, T)
-    Devuelve: escalar en [0,1], donde 1 = espectros idénticos.
-    """
-    # FFT de magnitud
-    Ff = torch.fft.rfft(fake, dim=2).abs()    # (B, C, F)
-    Fr = torch.fft.rfft(real, dim=2).abs()    # (B, C, F)
-
-    # Aplanar canal+frecuencia
-    Ff_flat = Ff.view(Ff.size(0), -1)         # (B, C*F)
-    Fr_flat = Fr.view(Fr.size(0), -1)         # (B, C*F)
-
-    # Normalizar
-    Ff_norm = Ff_flat / (Ff_flat.norm(dim=1, keepdim=True) + eps)
-    Fr_norm = Fr_flat / (Fr_flat.norm(dim=1, keepdim=True) + eps)
-
-    # Cosine similarity por muestra y media batch
-    cos = (Ff_norm * Fr_norm).sum(dim=1)       # (B,)
-    return cos.mean()                         # escalar
-
-def composite_loss(fake: torch.Tensor,
-                   real: torch.Tensor,
-                   alpha: float = 0.1) -> torch.Tensor:
-    """
-    Pérdida compuesta = MAE + alpha * (1 - SpectralCosine).
-    alpha regula la importancia de la parte espectral.
-    """
-    # 1) MAE en el dominio temporal
-    loss_time = F.l1_loss(fake, real)
-
-    # 2) Similaridad coseno espectral
-    #spec_cos = spectral_cosine_similarity(fake, real)
-    #loss_spec = 1.0 - spec_cos
-
-    return loss_time #+ alpha * loss_spec
-
+from utils.losses import composite_loss
 
 
 def init_he(m):
@@ -102,7 +59,7 @@ def train_epoch(G, D, loader, optG, optD, scaler, device, dz,
             optG.zero_grad(set_to_none=True)
             with torch.amp.autocast(device_type='cuda'):
                 gen = G(z, y)
-                g_loss = composite_loss(gen, xr,0.5)
+                g_loss = composite_loss(gen, xr,0.5, 0.5)
             scaler.scale(g_loss).backward()
             scaler.step(optG)
             scaler.update()

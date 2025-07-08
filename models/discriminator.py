@@ -1,47 +1,70 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .blocks import TemporalDisc, Spatial, Frequency
 
+# ────────────────────── Bloques disponibles ───────────────────
+from .blocks import TransformerTemporalDisc
+
+BLOCK_REGISTRY = {
+    #"basic_temporal":   lambda C, T, k=None: TemporalDisc(C, T),
+    #"basic_spatial":    lambda C, T, k:      SpatialDisc(C, T, k),
+    #"inception_temporal": lambda C, T, k=None: InceptionTemporalDisc(C, T),
+    #"inception_se_temporal": lambda C, T, k=None: InceptionSETemporalDisc(C, T),  # ← nuevo
+    "transformer_temporal": TransformerTemporalDisc,      # ← nuevo
+    #"resnet_temporal":  lambda C, T, k=None: ResNet1DTemporalDisc(C, T),  # ResNet1DTemporalDisc no está definido aquí
+    #"tcn_temporal":     lambda C, T, k=None: TCNTemporalDisc(C, T),  # Temporal Convolutional Network
+    #"dilated_temporal": lambda C, T, k=None: DilatedCNNTemporalDisc(C, T),  # ← nuevo
+    #"hybrid_temporal":  lambda C, T, k=None: HybridTemporalDisc(C, T),  # ← nuevo
+    #"spatial_axial":    lambda C, T, k=None: SpatialAxialDisc(C, T, k),  # ← nuevo
+    #"patchtst_temporal": lambda C, T, k=None: PatchTSTTemporalDisc(C, T),  # ← nuevo
+}
+
+
+
+# ─────────────────────────  Discriminador genérico  ────────────────────────
 class Discriminator(nn.Module):
-    def __init__(self,
-                 C: int,
-                 T: int,
-                 k: int,
-                 de: int,
-                 n_cls: int,
-                 use_t: bool = True,
-                 use_s: bool = False,
-                 use_f: bool = False):
-        
+    def __init__(self, C, T, de, n_cls,
+                 use_t=True, use_s=False, use_f=False,
+                 block_t="tcn_temporal",
+                 block_s="basic_spatial"):
         super().__init__()
-        self.C, self.T, self.k = C, T, k
+
         self.label = nn.Embedding(n_cls, de)
 
+        # Rama temporal (elige el bloque y toma su k_target)
+        if use_t:
+            self.t = BLOCK_REGISTRY[block_t](C, T)
+            self.k = self.t.k_target
+        else:
+            self.k = (T - 4) // 4 + 1      # valor por defecto
+
+        # Rama espacial (usa self.k para igualar tamaño)
+        if use_s:
+            self.s = BLOCK_REGISTRY[block_s](C, T, self.k)
+
         self.use_t, self.use_s, self.use_f = use_t, use_s, use_f
-        if use_t: self.t = TemporalDisc(C)
-        if use_s: self.s = Spatial(C)
-        if use_f: self.f = Frequency(C)
+        self.f = Frequency(C) if use_f else None
 
         self.head = nn.Sequential(
-            nn.Linear(C * T + de, 128),
+            nn.Linear(C * self.k + de, 128),
             nn.LeakyReLU(0.2),
             nn.Linear(128, 1),
             nn.Sigmoid()
         )
 
-    def forward(self, x, y):
+    def forward(self, x, y, debug=False):
         branches = []
         if self.use_t:
-            branches.append(self.t(x))
+            z = self.t(x); branches.append(z)
+            if debug: print("✔ Temporal ", z.shape)
         if self.use_s:
-            s = self.s(x).unsqueeze(-1).expand(-1, -1, self.k)
-            branches.append(s)
+            z = self.s(x); branches.append(z)
+            if debug: print("✔ Spatial  ", z.shape)
         if self.use_f:
-            f = self.f(x).unsqueeze(-1).expand(-1, -1, self.k)
-            branches.append(f)
+            z = self.f(x); branches.append(z)
+            if debug: print("✔ Frequency", z.shape)
 
-        merged = sum(branches) / len(branches)
-        feat = F.interpolate(merged, size=self.T, mode="linear")
-        flat = feat.view(x.size(0), -1)
+        merged = sum(branches) / len(branches)         # (B,C,k)
+        flat   = merged.reshape(x.size(0), -1)         # (B,C·k)
+
         return self.head(torch.cat([flat, self.label(y)], 1))
