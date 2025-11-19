@@ -29,6 +29,7 @@ High-density ECGI datasets rarely exceed a few dozen cases. This repository tack
 
 ---
 
+
 ## 🔍 Overview
 
 Electrocardiographic imaging (ECGI) seeks to reconstruct high-density epicardial electrical activity (HSPMs) from body surface recordings (BSPMs). In practice, ECGI research is limited by:
@@ -88,8 +89,19 @@ This implementation corresponds to the following main contributions of the paper
    - maximum temporal cross-correlation,  
    compared to classical and deep-learning baselines.
 
----
 
+If you use this repository, its models, or any derived results in academic or scientific work, please cite:
+
+@article{MayorcaTorres2025stw,
+  title   = {{STW--T cGAN}: Dual-Branch Spatiotemporal--Wavelet Transformer for ECGI Data Augmentation},
+  author  = {Mayorca-Torres, Dagoberto and León-Salas, Alejandro J. and Peluffo-Ordóñez, Diego H. and Ommane, Younes},
+  journal = {Biomedical Signal Processing and Control},
+  year    = {2025},
+  note    = {Under review}
+}
+© 2025 Dagoberto Mayorca-Torres, Alejandro J. León-Salas,
+   Diego H. Peluffo-Ordóñez, Younes Ommane. All rights reserved.
+   
 ## 📁 Project Structure
 
 ```text
@@ -106,3 +118,5 @@ STW-T_cgan/
 ├── results/              # Trained weights, metrics, and figures (created after runs)
 ├── environment.yml       # Conda environment specification
 └── README.md
+
+
