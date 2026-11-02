@@ -1,0 +1,12 @@
+torch
+numpy
+scipy
+pywt
+matplotlib
+scikit-image
+pandas
+scikit-learn
+pyyaml
+fastapi
+uvicorn[standard]
+python-multipart
